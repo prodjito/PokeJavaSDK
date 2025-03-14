@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -63,29 +62,20 @@ public class PokeApiClient {
 				nextUrl = rootNode.path("next").isNull() ? null : rootNode.get("next").asText();
 			}
 			
-			//Sequential retrieval of the full objects is very slow
-			/*List<T> allFullObjects = new ArrayList<>();
-			for (Map<String,Object> partialObject : allPartialObjects) {
-				String name = (String) partialObject.get("name");
-				System.out.println(name);
-				allFullObjects.add(getByIdOrName(baseUrl + "/" + name, fullType));
-			}
-			
-			return allFullObjects;*/
-			
 			//Asynchronous retrieval of the full objects is much faster
 			ExecutorService executor = Executors.newFixedThreadPool(10);
 			try {
-				List<CompletableFuture<T>> futures = allPartialObjects.stream()
-						.map(partialObject -> CompletableFuture.supplyAsync(() -> {
-							String name = (String) partialObject.get("name");
-							return getByIdOrName(baseUrl + "/" + name, fullType);
-						}, executor))
-						.collect(Collectors.toList());
+				List<CompletableFuture<T>> futures = new ArrayList<>();
+				allPartialObjects.forEach(partialObject -> {
+					futures.add(CompletableFuture.supplyAsync(() -> {
+						String name = (String) partialObject.get("name");
+						return getByIdOrName(baseUrl + "/" + name, fullType);
+					}, executor));
+				});
 				
-				return futures.stream()
-						.map(CompletableFuture::join)
-						.collect(Collectors.toList());
+				List<T> results = new ArrayList<>();
+				futures.forEach(future -> results.add(future.join()));
+				return results;
 			} finally {
 				executor.shutdown();
 			}
